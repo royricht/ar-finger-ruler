@@ -18,9 +18,8 @@
   <canvas id="camerafeed"></canvas>
   <div id="hint">Drag your finger across a real surface to measure it</div>
 
-  <!-- 8th Wall engine + extras. Replace YOUR_APP_KEY with the key from your 8thwall.com console. -->
-  <script async src="https://cdn.8thwall.com/web/xrextras/xr-extras.js"></script>
-  <script async src="https://apps.8thwall.com/xrweb?appKey=YOUR_APP_KEY"></script>
+  <!-- 8th Wall open-source engine. No account/appKey needed since the Feb 2026 open-source transition. -->
+  <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
 
   <script>
   const rulerPipelineModule = () => {
@@ -164,14 +163,13 @@
       XR8.GlTextureRenderer.pipelineModule(),
       XR8.Threejs.pipelineModule(),
       XR8.XrController.pipelineModule(),
-      XRExtras.AlmostThere.pipelineModule(),
-      XRExtras.FullWindowCanvas.pipelineModule(),
-      XRExtras.Loading.pipelineModule(),
-      XRExtras.RuntimeError.pipelineModule(),
       rulerPipelineModule(),
     ])
 
-    XR8.run({ canvas: document.getElementById('camerafeed') })
+    XR8.run({
+      canvas: document.getElementById('camerafeed'),
+      allowedDevices: XR8.XrConfig.device().ANY,
+    })
   }
 
   window.onload = () => {
