@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>AR Finger Ruler</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; }
+  #camerafeed { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  #hint {
+    position: absolute; top: 24px; left: 0; right: 0; text-align: center;
+    color: #fff; font-family: -apple-system, sans-serif; font-size: 14px;
+    text-shadow: 0 1px 3px rgba(0,0,0,.9); z-index: 10; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+  <canvas id="camerafeed"></canvas>
+  <div id="hint">Drag your finger across a real surface to measure it</div>
+
+  <!-- 8th Wall engine + extras. Replace YOUR_APP_KEY with the key from your 8thwall.com console. -->
+  <script async src="https://cdn.8thwall.com/web/xrextras/xr-extras.js"></script>
+  <script async src="https://apps.8thwall.com/xrweb?appKey=YOUR_APP_KEY"></script>
+
+  <script>
+  const rulerPipelineModule = () => {
+    let scene, camera, renderer
+    let activeLine = null
+    let activePoints = []
+    const finishedGroup = new THREE.Group()
+
+    const screenToNormalized = (clientX, clientY) => ({
+      x: clientX / window.innerWidth,
+      y: clientY / window.innerHeight,
+    })
+
+    // Raycast a screen point against 8th Wall's real-world surface tracking.
+    // Returns a THREE.Vector3 in meters, or null if nothing was hit under that point.
+    const hitTestScreenPoint = (x, y) => {
+      const hits = XR8.XrController.hitTest(x, y)
+      if (hits && hits.length > 0) {
+        const { position } = hits[0]
+        return new THREE.Vector3(position.x, position.y, position.z)
+      }
+      return null
+    }
+
+    const makeLine = () => {
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(600 * 3), 3))
+      geometry.setDrawRange(0, 0)
+      const material = new THREE.LineBasicMaterial({ color: 0x00ff88, linewidth: 4 })
+      return new THREE.Line(geometry, material)
+    }
+
+    const updateLineGeometry = (line, points) => {
+      const posAttr = line.geometry.attributes.position
+      points.forEach((p, i) => posAttr.setXYZ(i, p.x, p.y, p.z))
+      posAttr.needsUpdate = true
+      line.geometry.setDrawRange(0, points.length)
+      line.geometry.computeBoundingSphere()
+    }
+
+    const makeTextSprite = (text) => {
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const fontSize = 64
+      ctx.font = `bold ${fontSize}px sans-serif`
+      const padding = 24
+      const textWidth = ctx.measureText(text).width
+      canvas.width = textWidth + padding * 2
+      canvas.height = fontSize + padding * 2
+
+      ctx.font = `bold ${fontSize}px sans-serif`
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = '#00ff88'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(text, padding, canvas.height / 2)
+
+      const texture = new THREE.CanvasTexture(canvas)
+      const material = new THREE.SpriteMaterial({ map: texture, depthTest: false })
+      const sprite = new THREE.Sprite(material)
+      const worldUnitsPerPixel = 0.0025
+      sprite.scale.set(canvas.width * worldUnitsPerPixel, canvas.height * worldUnitsPerPixel, 1)
+      return sprite
+    }
+
+    const polylineLengthMeters = (points) => {
+      let total = 0
+      for (let i = 1; i < points.length; i++) total += points[i].distanceTo(points[i - 1])
+      return total
+    }
+
+    const onTouchStart = (e) => {
+      const touch = e.touches[0]
+      const { x, y } = screenToNormalized(touch.clientX, touch.clientY)
+      const hit = hitTestScreenPoint(x, y)
+      if (!hit) return
+
+      activePoints = [hit]
+      activeLine = makeLine()
+      updateLineGeometry(activeLine, activePoints)
+      scene.add(activeLine)
+    }
+
+    const onTouchMove = (e) => {
+      if (!activeLine) return
+      const touch = e.touches[0]
+      const { x, y } = screenToNormalized(touch.clientX, touch.clientY)
+      const hit = hitTestScreenPoint(x, y)
+      if (!hit) return
+
+      const last = activePoints[activePoints.length - 1]
+      if (last.distanceTo(hit) < 0.005) return // ~5mm min spacing to filter jitter
+
+      activePoints.push(hit)
+      updateLineGeometry(activeLine, activePoints)
+    }
+
+    const onTouchEnd = () => {
+      if (!activeLine || activePoints.length < 2) {
+        if (activeLine) scene.remove(activeLine)
+        activeLine = null
+        activePoints = []
+        return
+      }
+
+      const totalCm = (polylineLengthMeters(activePoints) * 100).toFixed(1)
+      const mid = activePoints[Math.floor(activePoints.length / 2)]
+
+      const label = makeTextSprite(`${totalCm} cm`)
+      label.position.copy(mid)
+      label.position.y += 0.03 // lift slightly so it doesn't z-fight the line
+
+      finishedGroup.add(activeLine)
+      finishedGroup.add(label)
+
+      activeLine = null
+      activePoints = []
+    }
+
+    return {
+      name: 'rulerPipelineModule',
+
+      onStart: ({ canvas }) => {
+        const { scene: s, camera: c, renderer: r } = XR8.Threejs.xrScene()
+        scene = s; camera = c; renderer = r
+
+        scene.add(new THREE.AmbientLight(0xffffff, 1))
+        scene.add(finishedGroup)
+
+        canvas.addEventListener('touchstart', onTouchStart, false)
+        canvas.addEventListener('touchmove', onTouchMove, false)
+        canvas.addEventListener('touchend', onTouchEnd, false)
+      },
+    }
+  }
+
+  const onxrloaded = () => {
+    XR8.XrController.configure({ disableWorldTracking: false })
+
+    XR8.addCameraPipelineModules([
+      XR8.GlTextureRenderer.pipelineModule(),
+      XR8.Threejs.pipelineModule(),
+      XR8.XrController.pipelineModule(),
+      XRExtras.AlmostThere.pipelineModule(),
+      XRExtras.FullWindowCanvas.pipelineModule(),
+      XRExtras.Loading.pipelineModule(),
+      XRExtras.RuntimeError.pipelineModule(),
+      rulerPipelineModule(),
+    ])
+
+    XR8.run({ canvas: document.getElementById('camerafeed') })
+  }
+
+  window.onload = () => {
+    window.XR8 ? onxrloaded() : window.addEventListener('xrloaded', onxrloaded)
+  }
+  </script>
+</body>
+</html>
