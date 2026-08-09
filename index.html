@@ -142,43 +142,45 @@
       return total
     }
 
+    // The line is always just [start, current] — a straight ruler line from where the
+    // drag began to where the finger is now — not a trace of every point passed through.
+    let startPoint = null
+
     const onTouchStart = (e) => {
       e.preventDefault()
       const touch = e.touches[0]
       const hit = hitTestScreenPoint(touch.clientX, touch.clientY)
       if (!hit) return
 
-      activePoints = [hit]
+      startPoint = hit
+      activePoints = []
       activeLine = makeLine()
-      updateLineGeometry(activeLine, activePoints)
       scene.add(activeLine)
     }
 
     const onTouchMove = (e) => {
       e.preventDefault()
-      if (!activeLine) return
+      if (!activeLine || !startPoint) return
       const touch = e.touches[0]
       const hit = hitTestScreenPoint(touch.clientX, touch.clientY)
       if (!hit) return
 
-      const last = activePoints[activePoints.length - 1]
-      if (last.distanceTo(hit) < 0.005) return // ~5mm min spacing to filter jitter
-
-      activePoints.push(hit)
+      activePoints = [startPoint, hit]
       updateLineGeometry(activeLine, activePoints)
     }
 
     const onTouchEnd = (e) => {
       e.preventDefault()
-      if (!activeLine || activePoints.length < 2) {
+      if (!activeLine || activePoints.length < 2 || activePoints[0].distanceTo(activePoints[1]) < 0.005) {
         if (activeLine) scene.remove(activeLine)
         activeLine = null
         activePoints = []
+        startPoint = null
         return
       }
 
       const totalCm = (polylineLengthMeters(activePoints) * 100).toFixed(1)
-      const mid = activePoints[Math.floor(activePoints.length / 2)]
+      const mid = new THREE.Vector3().addVectors(activePoints[0], activePoints[1]).multiplyScalar(0.5)
 
       const label = makeTextSprite(`${totalCm} cm`)
       label.position.copy(mid)
@@ -189,6 +191,7 @@
 
       activeLine = null
       activePoints = []
+      startPoint = null
     }
 
     return {
