@@ -62,18 +62,41 @@
     }
 
     // WebGL ignores THREE.LineBasicMaterial's linewidth on almost every platform (including
-    // Safari/iOS), so a visibly thicker line has to be built as a real 3D tube mesh instead.
-    const LINE_RADIUS = 0.002 // meters
+    // Safari/iOS), so a visibly thicker line has to be built as real geometry instead.
+    // TubeGeometry (Frenet frames) was tried and rejected: it's numerically unstable for
+    // near-straight paths — exactly what a measuring line is — and can throw vertices way
+    // off. Camera-facing billboard quads per segment have no such failure mode.
+    const LINE_WIDTH = 0.004 // meters
 
-    const makeLine = () => new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0x00ff88 }))
+    const makeLine = () => new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide }))
 
     const updateLineGeometry = (line, points) => {
       if (points.length < 2) return
-      const curve = new THREE.CatmullRomCurve3(points)
-      const tubularSegments = Math.max(points.length * 2, 8)
-      const newGeometry = new THREE.TubeGeometry(curve, tubularSegments, LINE_RADIUS, 6, false)
+      const positions = []
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i]
+        const b = points[i + 1]
+        const segDir = new THREE.Vector3().subVectors(b, a)
+        if (segDir.lengthSq() < 1e-10) continue
+        segDir.normalize()
+        const viewDir = new THREE.Vector3().subVectors(camera.position, a).normalize()
+        const side = new THREE.Vector3().crossVectors(segDir, viewDir)
+        if (side.lengthSq() < 1e-10) side.set(0, 1, 0)
+        side.normalize().multiplyScalar(LINE_WIDTH / 2)
+
+        const a0 = new THREE.Vector3().addVectors(a, side)
+        const a1 = new THREE.Vector3().subVectors(a, side)
+        const b0 = new THREE.Vector3().addVectors(b, side)
+        const b1 = new THREE.Vector3().subVectors(b, side)
+
+        positions.push(
+          a0.x, a0.y, a0.z, b0.x, b0.y, b0.z, a1.x, a1.y, a1.z,
+          a1.x, a1.y, a1.z, b0.x, b0.y, b0.z, b1.x, b1.y, b1.z,
+        )
+      }
       line.geometry.dispose()
-      line.geometry = newGeometry
+      line.geometry = new THREE.BufferGeometry()
+      line.geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     }
 
     const makeTextSprite = (text) => {
