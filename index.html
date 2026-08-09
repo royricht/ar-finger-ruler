@@ -6,7 +6,10 @@
 <title>AR Finger Ruler</title>
 <style>
   html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; }
-  #camerafeed { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  #camerafeed {
+    position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+    display: block; touch-action: none; -webkit-user-select: none; user-select: none;
+  }
   #hint {
     position: absolute; top: 24px; left: 0; right: 0; text-align: center;
     color: #fff; font-family: -apple-system, sans-serif; font-size: 14px;
@@ -31,13 +34,8 @@
     let activePoints = []
     const finishedGroup = new THREE.Group()
 
-    const screenToNormalized = (clientX, clientY) => ({
-      x: clientX / window.innerWidth,
-      y: clientY / window.innerHeight,
-    })
-
-    // Raycast a screen point against 8th Wall's real-world surface tracking.
-    // Returns a THREE.Vector3 in meters, or null if nothing was hit under that point.
+    // Raycast a screen point (CSS pixel coordinates) against 8th Wall's real-world
+    // surface tracking. Returns a THREE.Vector3 in meters, or null if nothing was hit.
     const hitTestScreenPoint = (x, y) => {
       const hits = XR8.XrController.hitTest(x, y)
       if (hits && hits.length > 0) {
@@ -95,9 +93,9 @@
     }
 
     const onTouchStart = (e) => {
+      e.preventDefault()
       const touch = e.touches[0]
-      const { x, y } = screenToNormalized(touch.clientX, touch.clientY)
-      const hit = hitTestScreenPoint(x, y)
+      const hit = hitTestScreenPoint(touch.clientX, touch.clientY)
       if (!hit) return
 
       activePoints = [hit]
@@ -107,10 +105,10 @@
     }
 
     const onTouchMove = (e) => {
+      e.preventDefault()
       if (!activeLine) return
       const touch = e.touches[0]
-      const { x, y } = screenToNormalized(touch.clientX, touch.clientY)
-      const hit = hitTestScreenPoint(x, y)
+      const hit = hitTestScreenPoint(touch.clientX, touch.clientY)
       if (!hit) return
 
       const last = activePoints[activePoints.length - 1]
@@ -120,7 +118,8 @@
       updateLineGeometry(activeLine, activePoints)
     }
 
-    const onTouchEnd = () => {
+    const onTouchEnd = (e) => {
+      e.preventDefault()
       if (!activeLine || activePoints.length < 2) {
         if (activeLine) scene.remove(activeLine)
         activeLine = null
@@ -152,9 +151,20 @@
         scene.add(new THREE.AmbientLight(0xffffff, 1))
         scene.add(finishedGroup)
 
-        canvas.addEventListener('touchstart', onTouchStart, false)
-        canvas.addEventListener('touchmove', onTouchMove, false)
-        canvas.addEventListener('touchend', onTouchEnd, false)
+        // Replaces XRExtras.FullWindowCanvas, which the open-source engine no longer bundles.
+        const resize = () => {
+          renderer.setPixelRatio(window.devicePixelRatio || 1)
+          renderer.setSize(window.innerWidth, window.innerHeight)
+          camera.aspect = window.innerWidth / window.innerHeight
+          camera.updateProjectionMatrix()
+        }
+        resize()
+        window.addEventListener('resize', resize)
+        window.addEventListener('orientationchange', resize)
+
+        canvas.addEventListener('touchstart', onTouchStart, { passive: false })
+        canvas.addEventListener('touchmove', onTouchMove, { passive: false })
+        canvas.addEventListener('touchend', onTouchEnd, { passive: false })
       },
     }
   }
