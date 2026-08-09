@@ -67,6 +67,7 @@
     // near-straight paths — exactly what a measuring line is — and can throw vertices way
     // off. Camera-facing billboard quads per segment have no such failure mode.
     const LINE_WIDTH = 0.004 // meters
+    const WORLD_UP = new THREE.Vector3(0, 1, 0)
 
     const makeLine = () => new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide }))
 
@@ -79,9 +80,17 @@
         const segDir = new THREE.Vector3().subVectors(b, a)
         if (segDir.lengthSq() < 1e-10) continue
         segDir.normalize()
-        const viewDir = new THREE.Vector3().subVectors(camera.position, a).normalize()
-        const side = new THREE.Vector3().crossVectors(segDir, viewDir)
-        if (side.lengthSq() < 1e-10) side.set(0, 1, 0)
+
+        // Using a fixed world-up reference (instead of the per-point camera direction)
+        // keeps the ribbon's width direction consistent segment-to-segment. The previous
+        // per-segment view-relative version flipped sides unpredictably as the path
+        // curved, turning the line into a zigzagging filled blob instead of a clean strip.
+        let side = new THREE.Vector3().crossVectors(segDir, WORLD_UP)
+        if (side.lengthSq() < 1e-6) {
+          // Segment is nearly vertical (parallel to world up) — WORLD_UP fallback only.
+          const viewDir = new THREE.Vector3().subVectors(camera.position, a).normalize()
+          side.crossVectors(segDir, viewDir)
+        }
         side.normalize().multiplyScalar(LINE_WIDTH / 2)
 
         const a0 = new THREE.Vector3().addVectors(a, side)
@@ -119,7 +128,10 @@
       const texture = new THREE.CanvasTexture(canvas)
       const material = new THREE.SpriteMaterial({ map: texture, depthTest: false })
       const sprite = new THREE.Sprite(material)
-      const worldUnitsPerPixel = 0.0025
+      // At the old 0.0025, a typical "12.3 cm" label rendered ~0.75m wide in world space —
+      // bigger than most objects being measured. Shrunk to a size that reads as a label,
+      // not a billboard.
+      const worldUnitsPerPixel = 0.0004
       sprite.scale.set(canvas.width * worldUnitsPerPixel, canvas.height * worldUnitsPerPixel, 1)
       return sprite
     }
