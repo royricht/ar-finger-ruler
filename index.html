@@ -61,20 +61,19 @@
       return null
     }
 
-    const makeLine = () => {
-      const geometry = new THREE.BufferGeometry()
-      geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(600 * 3), 3))
-      geometry.setDrawRange(0, 0)
-      const material = new THREE.LineBasicMaterial({ color: 0x00ff88, linewidth: 4 })
-      return new THREE.Line(geometry, material)
-    }
+    // WebGL ignores THREE.LineBasicMaterial's linewidth on almost every platform (including
+    // Safari/iOS), so a visibly thicker line has to be built as a real 3D tube mesh instead.
+    const LINE_RADIUS = 0.002 // meters
+
+    const makeLine = () => new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial({ color: 0x00ff88 }))
 
     const updateLineGeometry = (line, points) => {
-      const posAttr = line.geometry.attributes.position
-      points.forEach((p, i) => posAttr.setXYZ(i, p.x, p.y, p.z))
-      posAttr.needsUpdate = true
-      line.geometry.setDrawRange(0, points.length)
-      line.geometry.computeBoundingSphere()
+      if (points.length < 2) return
+      const curve = new THREE.CatmullRomCurve3(points)
+      const tubularSegments = Math.max(points.length * 2, 8)
+      const newGeometry = new THREE.TubeGeometry(curve, tubularSegments, LINE_RADIUS, 6, false)
+      line.geometry.dispose()
+      line.geometry = newGeometry
     }
 
     const makeTextSprite = (text) => {
