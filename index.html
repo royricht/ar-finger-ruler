@@ -168,11 +168,13 @@
         scene.add(finishedGroup)
 
         // Replaces XRExtras.FullWindowCanvas, which the open-source engine no longer bundles.
+        // Only touch the renderer's pixel size here — XR8.XrController owns the camera's
+        // projection matrix every frame to match the real device camera's optics, so
+        // setting camera.aspect/updateProjectionMatrix ourselves would fight that sync
+        // and misplace anything rendered relative to the real world.
         const resize = () => {
           renderer.setPixelRatio(window.devicePixelRatio || 1)
           renderer.setSize(window.innerWidth, window.innerHeight)
-          camera.aspect = window.innerWidth / window.innerHeight
-          camera.updateProjectionMatrix()
         }
         resize()
         window.addEventListener('resize', resize)
