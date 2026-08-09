@@ -34,10 +34,13 @@
     let activePoints = []
     const finishedGroup = new THREE.Group()
 
-    // Raycast a screen point (CSS pixel coordinates) against 8th Wall's real-world
-    // surface tracking. Returns a THREE.Vector3 in meters, or null if nothing was hit.
-    const hitTestScreenPoint = (x, y) => {
-      const hits = XR8.XrController.hitTest(x, y)
+    // Raycast a screen point against 8th Wall's real-world surface tracking.
+    // x, y are normalized [0,1], (0,0) = top-left, (1,1) = bottom-right of the camera feed.
+    // Returns a THREE.Vector3 in meters, or null if nothing was hit under that point.
+    const hitTestScreenPoint = (clientX, clientY) => {
+      const x = clientX / window.innerWidth
+      const y = clientY / window.innerHeight
+      const hits = XR8.XrController.hitTest(x, y, ['FEATURE_POINT'])
       if (hits && hits.length > 0) {
         const { position } = hits[0]
         return new THREE.Vector3(position.x, position.y, position.z)
