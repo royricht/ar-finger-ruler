@@ -15,11 +15,24 @@
     color: #fff; font-family: -apple-system, sans-serif; font-size: 14px;
     text-shadow: 0 1px 3px rgba(0,0,0,.9); z-index: 10; pointer-events: none;
   }
+  #start-overlay {
+    position: absolute; inset: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+  }
+  #start-button {
+    font-family: -apple-system, sans-serif; font-size: 18px; font-weight: 600;
+    color: #000; background: #00ff88; border: none; border-radius: 12px;
+    padding: 16px 32px;
+  }
 </style>
 </head>
 <body>
   <canvas id="camerafeed"></canvas>
   <div id="hint">Drag your finger across a real surface to measure it</div>
+  <div id="start-overlay">
+    <button id="start-button">Tap to Start AR</button>
+  </div>
 
   <!-- three.js must be loaded (and window.THREE set) before the engine's ThreeJS pipeline module runs. -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
@@ -188,9 +201,22 @@
     })
   }
 
-  window.onload = () => {
-    window.XR8 ? onxrloaded() : window.addEventListener('xrloaded', onxrloaded)
-  }
+  // iOS Safari blocks accelerometer/gyroscope access (needed for world tracking) until a
+  // page explicitly requests it via a user gesture. Gate AR startup behind a tap so this
+  // request happens synchronously inside the click handler, as iOS requires.
+  document.getElementById('start-button').addEventListener('click', () => {
+    document.getElementById('start-overlay').remove()
+
+    const startWhenEngineReady = () => {
+      window.XR8 ? onxrloaded() : window.addEventListener('xrloaded', onxrloaded)
+    }
+
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      DeviceMotionEvent.requestPermission().then(startWhenEngineReady).catch(startWhenEngineReady)
+    } else {
+      startWhenEngineReady()
+    }
+  })
   </script>
 </body>
 </html>
