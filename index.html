@@ -44,6 +44,21 @@
   const WORKER_URL = 'https://ar-ruler-measure.royr.workers.dev'
   const DEFAULT_HINT = 'Drag your finger across a real surface to measure it'
 
+  // A full-resolution phone capture (1000+ px, high devicePixelRatio) costs enough vision
+  // tokens on its own to blow Groq's free-tier per-minute budget for a single request.
+  // Downscaling before sending keeps token usage small and predictable regardless of
+  // device resolution.
+  const captureDownscaledImage = (sourceCanvas, maxDimension) => {
+    const scale = Math.min(1, maxDimension / Math.max(sourceCanvas.width, sourceCanvas.height))
+    const outW = Math.round(sourceCanvas.width * scale)
+    const outH = Math.round(sourceCanvas.height * scale)
+    const outCanvas = document.createElement('canvas')
+    outCanvas.width = outW
+    outCanvas.height = outH
+    outCanvas.getContext('2d').drawImage(sourceCanvas, 0, 0, outW, outH)
+    return outCanvas.toDataURL('image/jpeg', 0.6)
+  }
+
   const setHint = (text, revertAfterMs) => {
     const hintEl = document.getElementById('hint')
     hintEl.textContent = text
@@ -253,7 +268,7 @@
       finishedGroup.add(label)
 
       pendingCapture = () => {
-        const imageDataUrl = renderer.domElement.toDataURL('image/jpeg', 0.7)
+        const imageDataUrl = captureDownscaledImage(renderer.domElement, 768)
         analyzeWithAi(imageDataUrl, parseFloat(totalCm), label, labelPosition)
       }
 

@@ -54,11 +54,13 @@ async function handleMeasure(request, env) {
 
   const { image, slamEstimateCm } = body
   if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+    console.error('Bad image field. typeof:', typeof image, 'prefix:', typeof image === 'string' ? image.slice(0, 30) : image)
     return new Response(JSON.stringify({ error: 'Missing or invalid "image" (expected data: URI)' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json', ...corsHeaders },
     })
   }
+  console.log('Received image, length:', image.length, 'prefix:', image.slice(0, 30))
 
   const userText = `The app's own SLAM-based estimate for this line is ${
     typeof slamEstimateCm === 'number' ? slamEstimateCm.toFixed(1) + ' cm' : 'unavailable'
@@ -73,11 +75,14 @@ async function handleMeasure(request, env) {
     body: JSON.stringify({
       model: 'qwen/qwen3.6-27b',
       response_format: { type: 'json_object' },
-      // Without this, the model's reasoning output (<think>...</think>) precedes the JSON,
-      // which fails Groq's own json_object validation ("failed to validate json please
-      // adjust your prompt"). 'hidden' keeps the reasoning quality but strips it from the
-      // returned content so it's clean, parseable JSON.
-      reasoning_format: 'hidden',
+      // Groq's free tier caps this model at 8000 tokens/minute, checked against
+      // (prompt tokens + max_completion_tokens requested) BEFORE generation even starts —
+      // not actual usage. reasoning_format:'hidden' still burns real (uncapped) hidden
+      // reasoning tokens against that budget, which for a real photo reliably exhausted it
+      // and produced an empty completion ("failed to validate json"). reasoning_effort:
+      // 'none' disables reasoning entirely so token usage stays small and predictable.
+      reasoning_effort: 'none',
+      max_completion_tokens: 600,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
@@ -91,8 +96,11 @@ async function handleMeasure(request, env) {
     }),
   })
 
+  console.log('Groq response status:', groqResponse.status)
+
   if (!groqResponse.ok) {
     const errText = await groqResponse.text()
+    console.error('Groq error body:', errText)
     return new Response(JSON.stringify({ error: 'Upstream model call failed', detail: errText }), {
       status: 502,
       headers: { 'Content-Type': 'application/json', ...corsHeaders },
@@ -101,9 +109,11 @@ async function handleMeasure(request, env) {
 
   const groqJson = await groqResponse.json()
   const content = groqJson.choices?.[0]?.message?.content || ''
+  console.log('Groq content:', content)
   const parsed = extractJson(content)
 
   if (!parsed) {
+    console.error('Failed to parse JSON from content:', content)
     return new Response(JSON.stringify({ error: 'Model did not return parseable JSON', raw: content }), {
       status: 502,
       headers: { 'Content-Type': 'application/json', ...corsHeaders },
