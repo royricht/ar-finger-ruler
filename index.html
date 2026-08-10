@@ -25,11 +25,19 @@
     color: #000; background: #00ff88; border: none; border-radius: 12px;
     padding: 16px 32px;
   }
+  #ai-spinner {
+    position: absolute; top: 50%; left: 50%; margin-top: -24px; margin-left: -24px;
+    width: 48px; height: 48px; z-index: 15; display: none;
+    border: 5px solid rgba(255,255,255,0.25); border-top-color: #00ff88;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
   <canvas id="camerafeed"></canvas>
   <div id="hint">Drag your finger across a real surface to measure it</div>
+  <div id="ai-spinner"></div>
   <div id="start-overlay">
     <button id="start-button">Tap to Start AR</button>
   </div>
@@ -68,10 +76,15 @@
     }
   }
 
+  const setAiBusy = (busy) => {
+    document.getElementById('ai-spinner').style.display = busy ? 'block' : 'none'
+  }
+
   const rulerPipelineModule = () => {
     let scene, camera, renderer
     let activeLine = null
     let activePoints = []
+    let aiBusy = false
     const finishedGroup = new THREE.Group()
 
     // Set by onTouchEnd, run from onRender so the canvas is captured at the right moment
@@ -160,10 +173,10 @@
       const texture = new THREE.CanvasTexture(canvas)
       const material = new THREE.SpriteMaterial({ map: texture, depthTest: false })
       const sprite = new THREE.Sprite(material)
-      // At the old 0.0025, a typical "12.3 cm" label rendered ~0.75m wide in world space —
-      // bigger than most objects being measured. Shrunk to a size that reads as a label,
-      // not a billboard.
-      const worldUnitsPerPixel = 0.0004
+      // 0.0025 made a short label ~0.75m wide (too big); 0.0004 read as too small/hard to
+      // read on screen, especially now that the combined "X cm (AI=Y cm)" text is longer
+      // but still needs to stay legible at typical AR viewing distance.
+      const worldUnitsPerPixel = 0.001
       sprite.scale.set(canvas.width * worldUnitsPerPixel, canvas.height * worldUnitsPerPixel, 1)
       return sprite
     }
@@ -198,6 +211,8 @@
     // no reference to work from), the whole measurement — line and label — is discarded
     // rather than left showing a possibly-wrong sensor-only value.
     const analyzeWithAi = async (imageDataUrl, slamEstimateCm, line, label, position) => {
+      aiBusy = true
+      setAiBusy(true)
       setHint('Checking photo for a size reference…')
       try {
         const res = await fetch(WORKER_URL, {
@@ -224,6 +239,9 @@
         console.error('AI fetch failed:', err)
         removeMeasurement(line, label)
         setHint(`AI analysis failed, measurement discarded: ${err.message}`, 8000)
+      } finally {
+        aiBusy = false
+        setAiBusy(false)
       }
     }
 
@@ -239,6 +257,7 @@
 
     const onTouchStart = (e) => {
       e.preventDefault()
+      if (aiBusy) return
       const touch = e.touches[0]
       const hit = hitTestScreenPoint(touch.clientX, touch.clientY)
       if (!hit) return
