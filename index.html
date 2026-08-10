@@ -178,15 +178,26 @@
       return newLabel
     }
 
+    const removeMeasurement = (line, label) => {
+      finishedGroup.remove(line)
+      line.geometry.dispose()
+      line.material.dispose()
+      finishedGroup.remove(label)
+      label.material.map.dispose()
+      label.material.dispose()
+    }
+
     // The SLAM-based number is shown immediately, but it's built from IMU/camera scale
     // estimation alone and can be badly wrong (see conversation history). This asks a
     // vision model to look at the actual photo — including the drawn line — for a
     // recognizable object of known real-world size (power socket, coin, keyboard key,
     // etc.) near it, and use that as a scale reference instead. If it can't find one, it's
     // instructed to say so rather than fabricate a number.
-    let currentLabel = null
-    const analyzeWithAi = async (imageDataUrl, slamEstimateCm, label, position) => {
-      currentLabel = label
+    //
+    // If the AI can't produce a usable number (network/API failure, or it genuinely found
+    // no reference to work from), the whole measurement — line and label — is discarded
+    // rather than left showing a possibly-wrong sensor-only value.
+    const analyzeWithAi = async (imageDataUrl, slamEstimateCm, line, label, position) => {
       setHint('Checking photo for a size reference…')
       try {
         const res = await fetch(WORKER_URL, {
@@ -197,19 +208,22 @@
         const result = await res.json()
         if (result.error) {
           console.error('AI worker error:', result)
-          setHint(`AI error: ${result.error} — ${result.detail || result.raw || ''}`, 15000)
+          removeMeasurement(line, label)
+          setHint(`AI error, measurement discarded: ${result.error}`, 8000)
         } else if (typeof result.estimatedCm === 'number') {
-          currentLabel = replaceLabel(currentLabel, `${result.estimatedCm.toFixed(1)} cm`, position)
+          replaceLabel(label, `${slamEstimateCm.toFixed(1)} cm (AI=${result.estimatedCm.toFixed(1)} cm)`, position)
           const refNote = result.referenceFound
             ? `using ${result.referenceDescription}`
             : 'no reference found — rough guess'
           setHint(`AI estimate (${refNote}): ${result.explanation}`, 12000)
         } else {
-          setHint(`Sensor estimate shown — AI found no reference: ${result.explanation}`, 10000)
+          removeMeasurement(line, label)
+          setHint(`AI found no reference, measurement discarded: ${result.explanation}`, 10000)
         }
       } catch (err) {
         console.error('AI fetch failed:', err)
-        setHint(`AI analysis failed: ${err.message}`, 5000)
+        removeMeasurement(line, label)
+        setHint(`AI analysis failed, measurement discarded: ${err.message}`, 8000)
       }
     }
 
@@ -264,12 +278,13 @@
       const label = makeTextSprite(`${totalCm} cm`)
       label.position.copy(labelPosition)
 
-      finishedGroup.add(activeLine)
+      const lineMesh = activeLine
+      finishedGroup.add(lineMesh)
       finishedGroup.add(label)
 
       pendingCapture = () => {
         const imageDataUrl = captureDownscaledImage(renderer.domElement, 768)
-        analyzeWithAi(imageDataUrl, parseFloat(totalCm), label, labelPosition)
+        analyzeWithAi(imageDataUrl, parseFloat(totalCm), lineMesh, label, labelPosition)
       }
 
       activeLine = null
