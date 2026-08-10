@@ -66,7 +66,12 @@ async function callGroqWithRetry(payload, env, maxAttempts = 3) {
 
     const errText = await response.text()
     const isRateLimit = response.status === 429 || errText.includes('rate_limit_exceeded')
-    if (isRateLimit && attempt < maxAttempts) {
+    // Groq reports two very different kinds of rate limit in the same shape: per-minute
+    // (TPM), recoverable with a few seconds' wait, and per-day (TPD), which can require
+    // many minutes. Retrying the latter with a short backoff just wastes time — fail fast
+    // and let the caller show the real wait time instead.
+    const isDailyLimit = errText.includes('per day') || errText.includes('(TPD)')
+    if (isRateLimit && !isDailyLimit && attempt < maxAttempts) {
       const delaySeconds = Math.min(Math.max(parseRetryDelaySeconds(errText) ?? 3, 1), 15)
       console.log(`Rate limited (attempt ${attempt}/${maxAttempts}), retrying in ${delaySeconds}s`)
       await sleep(delaySeconds * 1000)
