@@ -73,6 +73,11 @@ async function handleMeasure(request, env) {
     body: JSON.stringify({
       model: 'qwen/qwen3.6-27b',
       response_format: { type: 'json_object' },
+      // Without this, the model's reasoning output (<think>...</think>) precedes the JSON,
+      // which fails Groq's own json_object validation ("failed to validate json please
+      // adjust your prompt"). 'hidden' keeps the reasoning quality but strips it from the
+      // returned content so it's clean, parseable JSON.
+      reasoning_format: 'hidden',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
