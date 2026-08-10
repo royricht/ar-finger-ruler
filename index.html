@@ -205,17 +205,32 @@
         scene.add(finishedGroup)
 
         // Replaces XRExtras.FullWindowCanvas, which the open-source engine no longer bundles.
-        // Only touch the renderer's pixel size here — XR8.XrController owns the camera's
-        // projection matrix every frame to match the real device camera's optics, so
-        // setting camera.aspect/updateProjectionMatrix ourselves would fight that sync
-        // and misplace anything rendered relative to the real world.
-        const resize = () => {
+        // We don't touch camera.aspect/updateProjectionMatrix ourselves — XR8.XrController
+        // owns the three.js camera's projection matrix every frame to match the real device
+        // camera's optics, and fighting that sync misplaces anything rendered in the scene.
+        //
+        // But XrController also needs to be told our actual rendering viewport size via
+        // updateCameraProjectionMatrix({cam: {pixelRectWidth, pixelRectHeight, ...}}) — its
+        // internal default is 0x0. Without this, hitTest()'s normalized [0,1] coordinates
+        // get interpreted against the wrong aspect ratio/FOV, which shows up as distortion
+        // that grows toward the screen edges regardless of real-world distance.
+        const syncCameraProjection = () => {
           renderer.setPixelRatio(window.devicePixelRatio || 1)
           renderer.setSize(window.innerWidth, window.innerHeight)
+          XR8.XrController.updateCameraProjectionMatrix({
+            cam: {
+              pixelRectWidth: canvas.width,
+              pixelRectHeight: canvas.height,
+              nearClipPlane: 0.01,
+              farClipPlane: 1000,
+            },
+            origin: camera.position,
+            facing: camera.quaternion,
+          })
         }
-        resize()
-        window.addEventListener('resize', resize)
-        window.addEventListener('orientationchange', resize)
+        syncCameraProjection()
+        window.addEventListener('resize', syncCameraProjection)
+        window.addEventListener('orientationchange', syncCameraProjection)
 
         canvas.addEventListener('touchstart', onTouchStart, { passive: false })
         canvas.addEventListener('touchmove', onTouchMove, { passive: false })
