@@ -180,7 +180,10 @@
           body: JSON.stringify({ image: imageDataUrl, slamEstimateCm }),
         })
         const result = await res.json()
-        if (typeof result.estimatedCm === 'number') {
+        if (result.error) {
+          console.error('AI worker error:', result)
+          setHint(`AI error: ${result.error}`, 8000)
+        } else if (typeof result.estimatedCm === 'number') {
           currentLabel = replaceLabel(currentLabel, `${result.estimatedCm.toFixed(1)} cm`, position)
           const refNote = result.referenceFound
             ? `using ${result.referenceDescription}`
@@ -190,7 +193,8 @@
           setHint(`Sensor estimate shown — AI found no reference: ${result.explanation}`, 10000)
         }
       } catch (err) {
-        setHint('AI analysis failed — showing sensor estimate only', 5000)
+        console.error('AI fetch failed:', err)
+        setHint(`AI analysis failed: ${err.message}`, 5000)
       }
     }
 
