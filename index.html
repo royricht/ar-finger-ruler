@@ -214,23 +214,23 @@
         // internal default is 0x0. Without this, hitTest()'s normalized [0,1] coordinates
         // get interpreted against the wrong aspect ratio/FOV, which shows up as distortion
         // that grows toward the screen edges regardless of real-world distance.
-        const syncCameraProjection = () => {
-          renderer.setPixelRatio(window.devicePixelRatio || 1)
-          renderer.setSize(window.innerWidth, window.innerHeight)
-          XR8.XrController.updateCameraProjectionMatrix({
-            cam: {
-              pixelRectWidth: canvas.width,
-              pixelRectHeight: canvas.height,
-              nearClipPlane: 0.01,
-              farClipPlane: 1000,
-            },
-            origin: camera.position,
-            facing: camera.quaternion,
-          })
-        }
-        syncCameraProjection()
-        window.addEventListener('resize', syncCameraProjection)
-        window.addEventListener('orientationchange', syncCameraProjection)
+        //
+        // This is deliberately called ONCE at startup, not on every resize. iOS Safari fires
+        // spurious 'resize' events during normal use (address bar show/hide, etc.), and
+        // re-running this resets XrController's tracking origin/facing reference each time —
+        // that was causing the AR content to flash and intermittently fail to draw.
+        renderer.setPixelRatio(window.devicePixelRatio || 1)
+        renderer.setSize(window.innerWidth, window.innerHeight)
+        XR8.XrController.updateCameraProjectionMatrix({
+          cam: {
+            pixelRectWidth: canvas.width,
+            pixelRectHeight: canvas.height,
+            nearClipPlane: 0.01,
+            farClipPlane: 1000,
+          },
+          origin: camera.position,
+          facing: camera.quaternion,
+        })
 
         canvas.addEventListener('touchstart', onTouchStart, { passive: false })
         canvas.addEventListener('touchmove', onTouchMove, { passive: false })
