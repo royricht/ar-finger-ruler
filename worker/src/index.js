@@ -41,6 +41,43 @@ function extractJson(text) {
   }
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Groq's free tier rate limit doesn't return a structured Retry-After; the delay is only
+// in the human-readable message ("...Please try again in 6.8s..."). Parse it, falling back
+// to a fixed delay if the format ever changes.
+function parseRetryDelaySeconds(errText) {
+  const match = errText.match(/try again in ([\d.]+)s/)
+  return match ? Number(match[1]) : null
+}
+
+async function callGroqWithRetry(payload, env, maxAttempts = 3) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: payload,
+    })
+
+    if (response.ok) return response
+
+    const errText = await response.text()
+    const isRateLimit = response.status === 429 || errText.includes('rate_limit_exceeded')
+    if (isRateLimit && attempt < maxAttempts) {
+      const delaySeconds = Math.min(Math.max(parseRetryDelaySeconds(errText) ?? 3, 1), 15)
+      console.log(`Rate limited (attempt ${attempt}/${maxAttempts}), retrying in ${delaySeconds}s`)
+      await sleep(delaySeconds * 1000)
+      continue
+    }
+
+    console.error('Groq error body:', errText)
+    return { ok: false, status: response.status, errText }
+  }
+}
+
 async function handleMeasure(request, env) {
   let body
   try {
@@ -66,42 +103,37 @@ async function handleMeasure(request, env) {
     typeof slamEstimateCm === 'number' ? slamEstimateCm.toFixed(1) + ' cm' : 'unavailable'
   }. Analyze the photo and the green line as instructed.`
 
-  const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'qwen/qwen3.6-27b',
-      response_format: { type: 'json_object' },
-      // Groq's free tier caps this model at 8000 tokens/minute, checked against
-      // (prompt tokens + max_completion_tokens requested) BEFORE generation even starts —
-      // not actual usage. reasoning_format:'hidden' still burns real (uncapped) hidden
-      // reasoning tokens against that budget, which for a real photo reliably exhausted it
-      // and produced an empty completion ("failed to validate json"). reasoning_effort:
-      // 'none' disables reasoning entirely so token usage stays small and predictable.
-      reasoning_effort: 'none',
-      max_completion_tokens: 600,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: userText },
-            { type: 'image_url', image_url: { url: image } },
-          ],
-        },
-      ],
-    }),
+  const payload = JSON.stringify({
+    model: 'qwen/qwen3.6-27b',
+    response_format: { type: 'json_object' },
+    // Groq's free tier caps this model at 8000 tokens/minute, checked against
+    // (prompt tokens + max_completion_tokens requested) BEFORE generation even starts —
+    // not actual usage. reasoning_format:'hidden' still burns real (uncapped) hidden
+    // reasoning tokens against that budget, which for a real photo reliably exhausted it
+    // and produced an empty completion ("failed to validate json"). reasoning_effort:
+    // 'none' disables reasoning entirely so token usage stays small and predictable.
+    reasoning_effort: 'none',
+    max_completion_tokens: 600,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: userText },
+          { type: 'image_url', image_url: { url: image } },
+        ],
+      },
+    ],
   })
+
+  // The free tier's per-minute budget is tight enough that a single burst of normal use can
+  // hit it; retry with the delay Groq itself reports rather than failing immediately.
+  const groqResponse = await callGroqWithRetry(payload, env)
 
   console.log('Groq response status:', groqResponse.status)
 
   if (!groqResponse.ok) {
-    const errText = await groqResponse.text()
-    console.error('Groq error body:', errText)
-    return new Response(JSON.stringify({ error: 'Upstream model call failed', detail: errText }), {
+    return new Response(JSON.stringify({ error: 'Upstream model call failed', detail: groqResponse.errText }), {
       status: 502,
       headers: { 'Content-Type': 'application/json', ...corsHeaders },
     })
