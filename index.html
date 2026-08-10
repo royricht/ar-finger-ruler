@@ -41,11 +41,28 @@
   <script src="https://cdn.jsdelivr.net/npm/@8thwall/engine-binary@1/dist/xr.js" async crossorigin="anonymous" data-preload-chunks="slam"></script>
 
   <script>
+  const WORKER_URL = 'https://ar-ruler-measure.royr.workers.dev'
+  const DEFAULT_HINT = 'Drag your finger across a real surface to measure it'
+
+  const setHint = (text, revertAfterMs) => {
+    const hintEl = document.getElementById('hint')
+    hintEl.textContent = text
+    clearTimeout(setHint._timer)
+    if (revertAfterMs) {
+      setHint._timer = setTimeout(() => { hintEl.textContent = DEFAULT_HINT }, revertAfterMs)
+    }
+  }
+
   const rulerPipelineModule = () => {
     let scene, camera, renderer
     let activeLine = null
     let activePoints = []
     const finishedGroup = new THREE.Group()
+
+    // Set by onTouchEnd, run from onRender so the canvas is captured at the right moment
+    // in the frame — toDataURL() on a WebGL canvas is unreliable outside that window
+    // because the browser can clear the drawing buffer right after each frame presents.
+    let pendingCapture = null
 
     // Raycast a screen point against 8th Wall's real-world surface tracking.
     // x, y are normalized [0,1], (0,0) = top-left, (1,1) = bottom-right of the camera feed.
@@ -136,6 +153,47 @@
       return sprite
     }
 
+    const replaceLabel = (oldLabel, newText, position) => {
+      finishedGroup.remove(oldLabel)
+      oldLabel.material.map.dispose()
+      oldLabel.material.dispose()
+      const newLabel = makeTextSprite(newText)
+      newLabel.position.copy(position)
+      finishedGroup.add(newLabel)
+      return newLabel
+    }
+
+    // The SLAM-based number is shown immediately, but it's built from IMU/camera scale
+    // estimation alone and can be badly wrong (see conversation history). This asks a
+    // vision model to look at the actual photo — including the drawn line — for a
+    // recognizable object of known real-world size (power socket, coin, keyboard key,
+    // etc.) near it, and use that as a scale reference instead. If it can't find one, it's
+    // instructed to say so rather than fabricate a number.
+    let currentLabel = null
+    const analyzeWithAi = async (imageDataUrl, slamEstimateCm, label, position) => {
+      currentLabel = label
+      setHint('Checking photo for a size reference…')
+      try {
+        const res = await fetch(WORKER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: imageDataUrl, slamEstimateCm }),
+        })
+        const result = await res.json()
+        if (typeof result.estimatedCm === 'number') {
+          currentLabel = replaceLabel(currentLabel, `${result.estimatedCm.toFixed(1)} cm`, position)
+          const refNote = result.referenceFound
+            ? `using ${result.referenceDescription}`
+            : 'no reference found — rough guess'
+          setHint(`AI estimate (${refNote}): ${result.explanation}`, 12000)
+        } else {
+          setHint(`Sensor estimate shown — AI found no reference: ${result.explanation}`, 10000)
+        }
+      } catch (err) {
+        setHint('AI analysis failed — showing sensor estimate only', 5000)
+      }
+    }
+
     const polylineLengthMeters = (points) => {
       let total = 0
       for (let i = 1; i < points.length; i++) total += points[i].distanceTo(points[i - 1])
@@ -181,13 +239,19 @@
 
       const totalCm = (polylineLengthMeters(activePoints) * 100).toFixed(1)
       const mid = new THREE.Vector3().addVectors(activePoints[0], activePoints[1]).multiplyScalar(0.5)
+      const labelPosition = mid.clone()
+      labelPosition.y += 0.03 // lift slightly so it doesn't z-fight the line
 
       const label = makeTextSprite(`${totalCm} cm`)
-      label.position.copy(mid)
-      label.position.y += 0.03 // lift slightly so it doesn't z-fight the line
+      label.position.copy(labelPosition)
 
       finishedGroup.add(activeLine)
       finishedGroup.add(label)
+
+      pendingCapture = () => {
+        const imageDataUrl = renderer.domElement.toDataURL('image/jpeg', 0.7)
+        analyzeWithAi(imageDataUrl, parseFloat(totalCm), label, labelPosition)
+      }
 
       activeLine = null
       activePoints = []
@@ -235,6 +299,13 @@
         canvas.addEventListener('touchstart', onTouchStart, { passive: false })
         canvas.addEventListener('touchmove', onTouchMove, { passive: false })
         canvas.addEventListener('touchend', onTouchEnd, { passive: false })
+      },
+
+      onRender: () => {
+        if (!pendingCapture) return
+        const capture = pendingCapture
+        pendingCapture = null
+        capture()
       },
     }
   }
