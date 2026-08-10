@@ -182,7 +182,7 @@
         const result = await res.json()
         if (result.error) {
           console.error('AI worker error:', result)
-          setHint(`AI error: ${result.error}`, 8000)
+          setHint(`AI error: ${result.error} — ${result.detail || result.raw || ''}`, 15000)
         } else if (typeof result.estimatedCm === 'number') {
           currentLabel = replaceLabel(currentLabel, `${result.estimatedCm.toFixed(1)} cm`, position)
           const refNote = result.referenceFound
